@@ -1,68 +1,133 @@
-name: C++ Windows CI/CD
+name: Calculator CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, master, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
   release:
     types: [ published ]
 
 jobs:
-  build-and-test:
+  build-windows:
     runs-on: windows-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup MSVC development environment
+    - name: Display structure of files
+      run: |
+        echo "Repository files:"
+        dir
+      shell: cmd
+    
+    - name: Setup MSVC compiler
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x64
     
-    - name: Configure CMake
+    - name: Compile calculator.cpp
       run: |
-        cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-      # Add -DRUN_TEST=1 if your CMake supports test flags [citation:4]
+        echo "Compiling calculator.cpp..."
+        cl /EHsc /Fe:calculator.exe calculator.cpp
+        echo "Compilation complete!"
+      shell: cmd
     
-    - name: Build project
+    - name: Verify executable created
       run: |
-        cmake --build build --config Release
+        if exist calculator.exe (
+          echo "✓ calculator.exe created successfully"
+          dir calculator.exe
+        ) else (
+          echo "✗ calculator.exe not found!"
+          exit /b 1
+        )
+      shell: cmd
     
-    - name: Run tests
+    - name: Run basic tests
       run: |
-        if (Test-Path "build/Release/your_test_executable.exe") {
-          .\build\Release\your_test_executable.exe
-        } else {
-          Write-Host "Test executable not found - skipping tests"
-        }
-      shell: pwsh
+        echo "Running tests..."
+        
+        echo "Test 1: Addition"
+        calculator.exe 5 + 3
+        if %errorlevel% neq 0 exit /b 1
+        
+        echo "Test 2: Subtraction"
+        calculator.exe 10 - 4
+        if %errorlevel% neq 0 exit /b 1
+        
+        echo "Test 3: Multiplication"
+        calculator.exe 6 * 7
+        if %errorlevel% neq 0 exit /b 1
+        
+        echo "Test 4: Division"
+        calculator.exe 15 / 3
+        if %errorlevel% neq 0 exit /b 1
+        
+        echo "All tests passed! ✓"
+      shell: cmd
     
-    - name: Upload build artifacts
+    - name: Test error handling
+      run: |
+        echo "Testing error cases..."
+        
+        echo "Test: Division by zero"
+        calculator.exe 10 / 0
+        
+        echo "Test: Invalid operator"
+        calculator.exe 5 ^ 3
+        
+        echo "Test: Invalid arguments"
+        calculator.exe 5 +
+        
+        echo "Error tests completed"
+      shell: cmd
+      continue-on-error: true
+    
+    - name: Upload calculator executable
       uses: actions/upload-artifact@v4
       with:
-        name: windows-executable-${{ github.sha }}
-        path: |
-          build/Release/*.exe
-          build/Release/*.dll
+        name: calculator-windows-x64
+        path: calculator.exe
+        retention-days: 30
+        if-no-files-found: error
+    
+    - name: Create version file
+      run: |
+        echo "Version: ${{ github.sha }}" > version.txt
+        echo "Build Date: %date% %time%" >> version.txt
+        echo "GitHub Run ID: ${{ github.run_id }}" >> version.txt
+      shell: cmd
+    
+    - name: Upload build info
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-info
+        path: version.txt
         retention-days: 30
 
-  deploy:
-    needs: build-and-test
+  # Optional: Create a release job
+  release:
+    needs: build-windows
     if: github.event_name == 'release' && github.event.action == 'published'
     runs-on: windows-latest
     
     steps:
-    - name: Download artifacts
+    - name: Download executable
       uses: actions/download-artifact@v4
       with:
-        name: windows-executable-${{ github.sha }}
-        path: ./artifacts
+        name: calculator-windows-x64
     
-    - name: Create deployment package
+    - name: Create release package
       run: |
-        Compress-Archive -Path ./artifacts/* -DestinationPath ./release-package.zip
+        echo "Creating release package..."
+        mkdir release-package
+        copy calculator.exe release-package\
+        echo "Calculator v${{ github.event.release.tag_name }}" > release-package\README.txt
+        echo "Build: ${{ github.sha }}" >> release-package\README.txt
+        7z a calculator-windows-${{ github.event.release.tag_name }}.zip .\release-package\*
+      shell: cmd
     
     - name: Upload to release
       uses: actions/upload-release-asset@v1
@@ -70,6 +135,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./release-package.zip
-        asset_name: windows-app-${{ github.event.release.tag_name }}.zip
+        asset_path: ./calculator-windows-${{ github.event.release.tag_name }}.zip
+        asset_name: calculator-windows-${{ github.event.release.tag_name }}.zip
         asset_content_type: application/zip
